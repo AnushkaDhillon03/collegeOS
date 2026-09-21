@@ -1,0 +1,223 @@
+{
+  "tasks": [
+    {
+      "id": "26c58436",
+      "title": "Data Structures Assignment 3 \u2014 AVL rotations",
+      "due": "2026-09-30",
+      "course": "CS401",
+      "type": "assignment",
+      "est_effort": 180,
+      "spent": 0,
+      "importance": 4,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "bf1725f2",
+      "title": "OS quiz on scheduling algorithms",
+      "due": "2026-09-24",
+      "course": "CS402",
+      "type": "quiz",
+      "est_effort": 60,
+      "spent": 0,
+      "importance": 3,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "60164384",
+      "title": "DBMS mid-sem exam",
+      "due": "2026-10-07",
+      "course": "CS403",
+      "type": "exam",
+      "est_effort": 480,
+      "spent": 0,
+      "importance": 5,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "aa5c06ad",
+      "title": "Read Chapter 7 \u2014 normalization",
+      "due": "2026-09-26",
+      "course": "CS403",
+      "type": "reading",
+      "est_effort": 60,
+      "spent": 0,
+      "importance": 2,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "a8f092cc",
+      "title": "Capstone synopsis submission",
+      "due": "2026-10-03",
+      "course": "CS499",
+      "type": "project",
+      "est_effort": 360,
+      "spent": 0,
+      "importance": 5,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "a0b7fef9",
+      "title": "Maths tutorial sheet 4",
+      "due": "2026-09-23",
+      "course": "MA401",
+      "type": "assignment",
+      "est_effort": 180,
+      "spent": 0,
+      "importance": 2,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    },
+    {
+      "id": "9c989205",
+      "title": "Fill semester feedback form",
+      "due": "2026-09-27",
+      "course": "HS401",
+      "type": "admin",
+      "est_effort": 20,
+      "spent": 0,
+      "importance": 1,
+      "done": false,
+      "done_on": null,
+      "source": "manual",
+      "created": "2026-09-21"
+    }
+  ],
+  "attendance": [
+    {
+      "course": "CS401",
+      "held": 40,
+      "attended": 34,
+      "threshold": 0.75
+    },
+    {
+      "course": "CS402",
+      "held": 38,
+      "attended": 25,
+      "threshold": 0.75
+    },
+    {
+      "course": "CS403",
+      "held": 36,
+      "attended": 30,
+      "threshold": 0.75
+    }
+  ],
+  "plan": {
+    "made_on": "2026-09-21",
+    "blocks": [
+      {
+        "task_id": "a0b7fef9",
+        "day": "2026-09-21",
+        "minutes": 90
+      },
+      {
+        "task_id": "a8f092cc",
+        "day": "2026-09-21",
+        "minutes": 90
+      },
+      {
+        "task_id": "a0b7fef9",
+        "day": "2026-09-22",
+        "minutes": 90
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-22",
+        "minutes": 90
+      },
+      {
+        "task_id": "a8f092cc",
+        "day": "2026-09-23",
+        "minutes": 90
+      },
+      {
+        "task_id": "bf1725f2",
+        "day": "2026-09-23",
+        "minutes": 60
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-23",
+        "minutes": 30
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-24",
+        "minutes": 90
+      },
+      {
+        "task_id": "a8f092cc",
+        "day": "2026-09-24",
+        "minutes": 90
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-25",
+        "minutes": 90
+      },
+      {
+        "task_id": "aa5c06ad",
+        "day": "2026-09-25",
+        "minutes": 60
+      },
+      {
+        "task_id": "26c58436",
+        "day": "2026-09-25",
+        "minutes": 30
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-26",
+        "minutes": 120
+      },
+      {
+        "task_id": "26c58436",
+        "day": "2026-09-26",
+        "minutes": 90
+      },
+      {
+        "task_id": "a8f092cc",
+        "day": "2026-09-26",
+        "minutes": 90
+      },
+      {
+        "task_id": "26c58436",
+        "day": "2026-09-27",
+        "minutes": 60
+      },
+      {
+        "task_id": "60164384",
+        "day": "2026-09-27",
+        "minutes": 60
+      },
+      {
+        "task_id": "9c989205",
+        "day": "2026-09-27",
+        "minutes": 20
+      }
+    ],
+    "at_risk": {}
+  },
+  "capacity": {
+    "weekday_minutes": 180,
+    "weekend_minutes": 300,
+    "committed": {}
+  }
+}
