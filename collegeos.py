@@ -23,6 +23,7 @@ Usage
     python collegeos.py log <task_id> --minutes 45     # record work, re-estimate
     python collegeos.py attendance CS401 --held 40 --attended 28
     python collegeos.py replan [--mode repair|rebuild]
+    python collegeos.py gcal-sync [--approve]          # study plan -> Google Calendar
     python collegeos.py plan --llm                    # advisor-weighted plan
     python collegeos.py explain                        # why, without replanning
     python collegeos.py evaluate [--runs 40]           # agent vs EDF baseline
@@ -996,6 +997,230 @@ class DryRunCalendarConnector(Connector):
             print(f"  [calendar] would create {a['minutes']}m block on {a['day']}")
 
 
+def google_credentials(scopes: List[str], credentials_path: str = "credentials.json",
+                       token_path: str = "google_token.json"):
+    """
+    One Google login helper, shared by Calendar now and Gmail later.
+
+    First run opens your browser so you can approve access, then saves a
+    token file so you don't have to log in every time. credentials.json is
+    the OAuth "Desktop app" file you download from Google Cloud Console.
+    """
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError:
+        raise RuntimeError(
+            "Google libraries are missing. Install them with:\n"
+            "  pip3 install google-auth-oauthlib google-api-python-client")
+
+    creds = None
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, scopes)
+    if creds and creds.valid:
+        return creds
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            with open(token_path, "w", encoding="utf-8") as f:
+                f.write(creds.to_json())
+            return creds
+        except Exception:                            # noqa: BLE001
+            pass                                     # fall through to a fresh login
+    if not os.path.exists(credentials_path):
+        raise RuntimeError(
+            f"{credentials_path} not found. Download the OAuth client file "
+            "(type: Desktop app) from Google Cloud Console and put it in this folder.")
+    flow = InstalledAppFlow.from_client_secrets_file(credentials_path, scopes)
+    creds = flow.run_local_server(port=0)
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
+    try:
+        os.chmod(token_path, 0o600)                  # token = login, keep it private
+    except OSError:
+        pass
+    return creds
+
+
+class GoogleCalendarConnector(Connector):
+    """
+    Puts the study plan on Google Calendar as events.
+
+    Safe by design:
+      - propose() only READS your calendar and returns a list of changes;
+        nothing is written until commit() is called (the CLI needs --approve).
+      - It only ever deletes events that CollegeOS itself created (they carry
+        a private tag), never your own events.
+      - New study blocks are placed around your existing events, inside a
+        study window (default 18:00-23:00 on weekdays).
+    """
+    name = "google-calendar"
+    SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+    TAG = "collegeos"
+
+    def __init__(self, tasks: Dict[str, Task], tz: str = "Asia/Kolkata",
+                 study_start: str = "18:00", study_end: str = "23:00",
+                 weekend_start: str = "10:00", gap_min: int = 10,
+                 calendar_id: str = "primary", days: int = 14,
+                 credentials_path: str = "credentials.json",
+                 token_path: str = "google_token.json"):
+        self.tasks = tasks
+        self.tz_name = tz
+        self.study_start, self.study_end = study_start, study_end
+        self.weekend_start, self.gap_min = weekend_start, gap_min
+        self.calendar_id, self.days = calendar_id, days
+        self.credentials_path, self.token_path = credentials_path, token_path
+        self.last_skipped: List[Tuple[Block, str]] = []
+        self._svc = None
+
+    def _tz(self):
+        try:
+            from zoneinfo import ZoneInfo
+            return ZoneInfo(self.tz_name)
+        except Exception:                            # noqa: BLE001
+            raise RuntimeError(f"Unknown time zone '{self.tz_name}'. "
+                               "Use a name like Asia/Kolkata.")
+
+    def _service(self):
+        if self._svc is None:
+            creds = google_credentials(self.SCOPES, self.credentials_path, self.token_path)
+            from googleapiclient.discovery import build
+            self._svc = build("calendar", "v3", credentials=creds)
+        return self._svc
+
+    def fetch(self, since: date) -> List[Task]:
+        return []                                    # write-only connector
+
+    # --- pure placement logic (easy to test without Google) -----------------
+    @staticmethod
+    def place_blocks(blocks: List[Block], busy: list, tz, study_start: str,
+                     study_end: str, weekend_start: str, gap_min: int):
+        """
+        busy: list of (start, end) timezone-aware datetimes.
+        Returns (placed, skipped); placed = [(Block, start, end)].
+        Each block goes in the first free gap in the study window.
+        """
+        from datetime import datetime, time as dtime
+
+        def hm(x: str):
+            h, m = x.split(":")
+            return dtime(int(h), int(m))
+
+        busy = sorted(busy)
+        by_day: Dict[date, List[Block]] = {}
+        for b in blocks:
+            by_day.setdefault(b.day, []).append(b)
+
+        placed, skipped = [], []
+        for day in sorted(by_day):
+            first = hm(weekend_start) if day.weekday() >= 5 else hm(study_start)
+            cursor = datetime.combine(day, first, tzinfo=tz)
+            limit = datetime.combine(day, hm(study_end), tzinfo=tz)
+            for b in by_day[day]:
+                dur = timedelta(minutes=b.minutes)
+                while True:
+                    end = cursor + dur
+                    clash = next((x for x in busy if x[0] < end and x[1] > cursor), None)
+                    if clash is None:
+                        break
+                    cursor = clash[1]
+                if end > limit:
+                    skipped.append((b, f"no free slot before {study_end}"))
+                    continue
+                placed.append((b, cursor, end))
+                cursor = end + timedelta(minutes=gap_min)
+        return placed, skipped
+
+    def _list_events(self, first: date, last: date) -> list:
+        from datetime import datetime, time as dtime
+        tz = self._tz()
+        t_min = datetime.combine(first, dtime(0, 0), tzinfo=tz).isoformat()
+        t_max = datetime.combine(last + timedelta(days=1), dtime(0, 0), tzinfo=tz).isoformat()
+        svc, items, token = self._service(), [], None
+        while True:
+            resp = svc.events().list(
+                calendarId=self.calendar_id, timeMin=t_min, timeMax=t_max,
+                singleEvents=True, orderBy="startTime", maxResults=250,
+                pageToken=token).execute()
+            items.extend(resp.get("items", []))
+            token = resp.get("nextPageToken")
+            if not token:
+                return items
+
+    @staticmethod
+    def _parse_dt(x: str):
+        from datetime import datetime
+        return datetime.fromisoformat(x.replace("Z", "+00:00"))
+
+    def propose(self, plan: Plan) -> List[dict]:
+        from datetime import datetime
+        tz = self._tz()
+        today = date.today()
+        cutoff = today + timedelta(days=self.days)
+        blocks = [b for b in plan.blocks if today <= b.day <= cutoff]
+        self.last_skipped = []
+        if not blocks:
+            return []
+
+        first, last = min(b.day for b in blocks), max(b.day for b in blocks)
+        busy, ours = [], []
+        now = datetime.now(tz)
+        for ev in self._list_events(first, last):
+            if ev.get("status") == "cancelled":
+                continue
+            start = ev.get("start", {}).get("dateTime")
+            end = ev.get("end", {}).get("dateTime")
+            if ev.get("extendedProperties", {}).get("private", {}).get(self.TAG) == "1":
+                if start and self._parse_dt(start) >= now:   # only future ones
+                    ours.append(ev)
+                continue
+            if ev.get("transparency") == "transparent" or not (start and end):
+                continue                                     # free / all-day: not blocking
+            busy.append((self._parse_dt(start), self._parse_dt(end)))
+
+        placed, self.last_skipped = self.place_blocks(
+            blocks, busy, tz, self.study_start, self.study_end,
+            self.weekend_start, self.gap_min)
+
+        actions: List[dict] = []
+        for ev in ours:
+            actions.append({"action": "delete_event", "event_id": ev["id"],
+                            "label": ev.get("summary", "CollegeOS block"),
+                            "when": ev["start"]["dateTime"]})
+        for b, s, e in placed:
+            t = self.tasks.get(b.task_id)
+            title = t.title if t else b.task_id
+            course = t.course if t else ""
+            actions.append({
+                "action": "create_event", "task_id": b.task_id,
+                "label": f"Study: {title}", "when": s.isoformat(), "minutes": b.minutes,
+                "body": {
+                    "summary": f"Study: {title}",
+                    "description": f"{course} \u2014 {b.minutes} min, planned by CollegeOS",
+                    "start": {"dateTime": s.isoformat(), "timeZone": self.tz_name},
+                    "end": {"dateTime": e.isoformat(), "timeZone": self.tz_name},
+                    "reminders": {"useDefault": False,
+                                  "overrides": [{"method": "popup", "minutes": 10}]},
+                    "extendedProperties": {"private": {self.TAG: "1", "task_id": b.task_id}},
+                }})
+        return actions
+
+    def commit(self, actions: List[dict]) -> None:
+        svc, done = self._service(), 0
+        try:
+            for a in actions:
+                if a["action"] == "delete_event":
+                    svc.events().delete(calendarId=self.calendar_id,
+                                        eventId=a["event_id"]).execute()
+                elif a["action"] == "create_event":
+                    svc.events().insert(calendarId=self.calendar_id, body=a["body"]).execute()
+                done += 1
+        except Exception as e:                       # noqa: BLE001
+            raise RuntimeError(f"Google Calendar failed after {done} of "
+                               f"{len(actions)} changes: {e}")
+
+
 class ERPConnector:
     """
     Talks to the NorthCap ERP directly, against an undocumented
@@ -1238,7 +1463,7 @@ class SimResult:
 
 
 def simulate(seed: int, policy: str, semester_days: int = 45,
-             n_tasks: int = 22) -> SimResult:
+             n_tasks: int = 22, weights: Optional[dict] = None) -> SimResult:
     """
     One synthetic semester.
 
@@ -1250,6 +1475,11 @@ def simulate(seed: int, policy: str, semester_days: int = 45,
     Policies:
       edf   — earliest deadline first, no effort pressure, replan by rebuild
       agent — full prioritizer + repair-mode replanning + re-estimation
+
+    `weights`, when given, overrides the agent policy's Prioritizer weights
+    (keys: w_urgency, w_weight, w_pressure, w_boost) — used for ablations.
+    Ignored for the edf policy, which always uses its fixed urgency-only
+    weighting.
     """
     rng = random.Random(seed)
     today = date(2026, 8, 3)
@@ -1284,7 +1514,7 @@ def simulate(seed: int, policy: str, semester_days: int = 45,
         pri = Prioritizer(w_urgency=1.0, w_weight=0.0, w_pressure=0.0, w_boost=0.0)
         mode = "rebuild"
     else:
-        pri = Prioritizer()
+        pri = Prioritizer(**weights) if weights else Prioritizer()
         mode = "repair"
 
     sched = Scheduler(cap, pri)
@@ -1343,31 +1573,94 @@ def simulate(seed: int, policy: str, semester_days: int = 45,
                      statistics.mean(churns) if churns else 0.0, crunch)
 
 
-def evaluate(runs: int = 40) -> None:
-    rows = {}
-    for policy in ("edf", "agent"):
-        res = [simulate(seed, policy) for seed in range(runs)]
-        rows[policy] = {
-            "on_time_pct": 100 * statistics.mean(
-                r.on_time / (r.on_time + r.late) for r in res),
-            "lateness_days": statistics.mean(r.total_lateness_days for r in res),
-            "churn": statistics.mean(r.mean_churn for r in res),
-            "crunch_days": statistics.mean(r.crunch_days for r in res),
-        }
+def _mean_ci95(xs: List[float]) -> Tuple[float, float]:
+    """Mean and a normal-approximation 95% CI half-width (1.96 * SEM).
+    Fine for n>=25ish; this is a teaching/eval harness, not a stats paper."""
+    if not xs:
+        return 0.0, 0.0
+    m = statistics.mean(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    sd = statistics.stdev(xs)
+    return m, 1.96 * sd / (len(xs) ** 0.5)
 
-    print(f"\n{runs} simulated semesters, 22 tasks each\n")
-    print(f"{'metric':<22}{'EDF baseline':>16}{'agent':>16}{'delta':>12}")
-    print("-" * 66)
+
+def evaluate(runs: int = 40, weights: Optional[dict] = None) -> dict:
+    """
+    Runs both policies, prints a comparison table with 95% CIs, and returns
+    the raw per-metric (mean, ci95) values so callers (e.g. the ablation)
+    can reuse them without re-simulating.
+    """
+    rows = {}
+    raw = {}
+    for policy in ("edf", "agent"):
+        res = [simulate(seed, policy, weights=weights) for seed in range(runs)]
+        on_time_pcts = [100 * r.on_time / (r.on_time + r.late) for r in res]
+        lateness = [r.total_lateness_days for r in res]
+        churns = [r.mean_churn for r in res]
+        crunch = [r.crunch_days for r in res]
+        raw[policy] = {
+            "on_time_pct": on_time_pcts, "lateness_days": lateness,
+            "churn": churns, "crunch_days": crunch,
+        }
+        rows[policy] = {k: _mean_ci95(v) for k, v in raw[policy].items()}
+
+    print(f"\n{runs} simulated semesters, 22 tasks each (95% CI shown as \u00b1)\n")
+    print(f"{'metric':<22}{'EDF baseline':>20}{'agent':>20}")
+    print("-" * 62)
     for k, label, fmt in [
         ("on_time_pct", "on-time completion %", "{:.1f}"),
         ("lateness_days", "total lateness (days)", "{:.1f}"),
         ("churn", "mean plan churn", "{:.3f}"),
         ("crunch_days", "crunch days", "{:.1f}"),
     ]:
-        b, a = rows["edf"][k], rows["agent"][k]
-        print(f"{label:<22}{fmt.format(b):>16}{fmt.format(a):>16}"
-              f"{fmt.format(a - b):>12}")
+        (bm, bc), (am, ac) = rows["edf"][k], rows["agent"][k]
+        bstr = f"{fmt.format(bm)} \u00b1{fmt.format(bc)}"
+        astr = f"{fmt.format(am)} \u00b1{fmt.format(ac)}"
+        print(f"{label:<22}{bstr:>20}{astr:>20}")
     print("\nHigher on-time is better; lower lateness, churn and crunch are better.")
+    print("Overlapping CIs on a metric mean the two policies are not")
+    print("distinguishable on it at this sample size.\n")
+    return rows
+
+
+def evaluate_ablation(runs: int = 40) -> None:
+    """
+    Zeroes out each Prioritizer weight one at a time (vs the agent's default
+    weights) and reports the change in on-time completion, so you can see
+    which signal is actually pulling weight in the simulation rather than
+    assuming all four matter equally.
+    """
+    base = Prioritizer()
+    configs = {
+        "full (default)": None,
+        "no urgency (w_urgency=0)": {"w_urgency": 0.0, "w_weight": base.w_weight,
+                                     "w_pressure": base.w_pressure, "w_boost": base.w_boost},
+        "no importance (w_weight=0)": {"w_urgency": base.w_urgency, "w_weight": 0.0,
+                                       "w_pressure": base.w_pressure, "w_boost": base.w_boost},
+        "no workload pressure (w_pressure=0)": {"w_urgency": base.w_urgency, "w_weight": base.w_weight,
+                                                "w_pressure": 0.0, "w_boost": base.w_boost},
+        "no attendance boost (w_boost=0)": {"w_urgency": base.w_urgency, "w_weight": base.w_weight,
+                                            "w_pressure": base.w_pressure, "w_boost": 0.0},
+    }
+
+    print(f"\nWeight ablation, {runs} simulated semesters per configuration")
+    print("(agent policy only; each row zeroes one signal vs the full default)\n")
+    print(f"{'configuration':<38}{'on-time %':>14}{'lateness (d)':>16}{'churn':>10}")
+    print("-" * 78)
+    for name, w in configs.items():
+        res = [simulate(seed, "agent", weights=w) for seed in range(runs)]
+        on_time_pcts = [100 * r.on_time / (r.on_time + r.late) for r in res]
+        lateness = [r.total_lateness_days for r in res]
+        churns = [r.mean_churn for r in res]
+        om, oc = _mean_ci95(on_time_pcts)
+        lm, lc = _mean_ci95(lateness)
+        cm, cc = _mean_ci95(churns)
+        print(f"{name:<38}{f'{om:.1f}\u00b1{oc:.1f}':>14}"
+              f"{f'{lm:.1f}\u00b1{lc:.1f}':>16}{f'{cm:.3f}\u00b1{cc:.3f}':>10}")
+    print("\nA row close to the full-default row means that signal contributed")
+    print("little to the outcome in this simulation; a row far from it means")
+    print("the signal mattered.\n")
     print("Report these with confidence intervals and an ablation over the")
     print("Prioritizer weights — that table is the evaluation section.\n")
 
@@ -1508,6 +1801,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ev = sub.add_parser("evaluate", help="agent vs EDF baseline")
     ev.add_argument("--runs", type=int, default=40)
+    ev.add_argument("--ablation", action="store_true",
+                    help="also report a per-signal weight ablation")
+
+    gc = sub.add_parser("gcal-sync", help="put the study plan on Google Calendar")
+    gc.add_argument("--approve", action="store_true",
+                    help="actually write to your calendar (default: just show changes)")
+    gc.add_argument("--days", type=int, default=14, help="how many days ahead to sync")
+    gc.add_argument("--start", default="18:00", help="weekday study start time")
+    gc.add_argument("--end", default="23:00", help="latest study end time")
+    gc.add_argument("--tz", default="Asia/Kolkata")
 
     cal = sub.add_parser("sync", help="propose calendar changes")
     cal.add_argument("--approve", action="store_true")
@@ -1517,6 +1820,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "evaluate":
         evaluate(args.runs)
+        if args.ablation:
+            evaluate_ablation(args.runs)
         return 0
 
     state = State.load()
@@ -1670,6 +1975,43 @@ def main(argv: Optional[List[str]] = None) -> int:
                   f"{c.end_min//60:02d}:{c.end_min%60:02d}  "
                   f"{c.course_code:<7} {c.course_name[:38]:<38} {c.room}")
         print("\nStudy capacity adjusted for these days. Run: python3 collegeos.py replan")
+        return 0
+
+    if args.cmd == "gcal-sync":
+        if not state.plan or not state.plan.blocks:
+            print("No plan yet. Run: python3 collegeos.py plan")
+            return 1
+        conn = GoogleCalendarConnector({t.id: t for t in state.tasks}, tz=args.tz,
+                                       study_start=args.start, study_end=args.end,
+                                       days=args.days)
+        try:
+            actions = conn.propose(state.plan)
+        except RuntimeError as e:
+            print(f"[error] {e}")
+            return 1
+        dels = [a for a in actions if a["action"] == "delete_event"]
+        news = [a for a in actions if a["action"] == "create_event"]
+        print(f"\nChanges to your Google Calendar: {len(news)} to add, "
+              f"{len(dels)} old CollegeOS events to replace")
+        for a in dels:
+            print(f"  - remove  {a['when'][:16]}  {a['label']}")
+        for a in news:
+            print(f"  + add     {a['when'][:16]}  {a['minutes']:>3}m  {a['label']}")
+        for b, why in conn.last_skipped:
+            t = state.task(b.task_id)
+            print(f"  ! skipped {b.day}  {t.title if t else b.task_id}: {why}")
+        if not actions:
+            print("Nothing to do.")
+            return 0
+        if not args.approve:
+            print("\nNothing was changed. Run again with --approve to apply.")
+            return 0
+        try:
+            conn.commit(actions)
+        except RuntimeError as e:
+            print(f"[error] {e}")
+            return 1
+        print("\nDone. Check your Google Calendar.")
         return 0
 
     if args.cmd == "sync":
