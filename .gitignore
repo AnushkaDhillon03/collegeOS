@@ -1,0 +1,29 @@
+
+# Private credentials
+canvas_token.json
+credentials.json
+google_token.json
+.env
+
+# Personal project data
+collegeos_state.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Mac
+.DS_Store
+
+# Private credentials and user data
+erp_token.json
+gmail_token.json
+gmail_senders.json
+credentials.json
+token.json
+*_token.json
+.env
+collegeos_state.json*
+*.bak

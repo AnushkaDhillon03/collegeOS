@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CollegeOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: planner on paper. Left column is the day and the task list, right column is what needs attention.
+   Palette: paper, ink, highlighter yellow for planned work, pen blue for classes, stamp red for trouble. */
+:root{
+  --paper:#F3F5F1; --band:#E8ECE4; --ink:#17212C; --muted:#56626F; --line:#D2D9CC;
+  --hi:#F6D640; --on-hi:#17212C; --pen:#2846C9; --stamp:#B8362B; --ok:#2B7A50;
+  --sans:"Schibsted Grotesk","Avenir Next","Segoe UI",system-ui,-apple-system,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#12181E; --band:#1B232B; --ink:#E8EDF1; --muted:#9AA6B2; --line:#2C3741;
+    --hi:#E7C73A; --pen:#8CA4FF; --stamp:#FF8174; --ok:#6CC796; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#12181E; --band:#1B232B; --ink:#E8EDF1; --muted:#9AA6B2; --line:#2C3741;
+  --hi:#E7C73A; --pen:#8CA4FF; --stamp:#FF8174; --ok:#6CC796; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--paper)}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 1rem/1.5 var(--sans);
+  padding-block:2rem 4rem;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:74rem;margin:0 auto}
+h1,h2,h3,p,ul,ol{margin:0}
+h1,h2,h3{font-weight:700;letter-spacing:-.015em;text-wrap:balance}
+h1{font-size:clamp(2.1rem,6vw,3.5rem);line-height:1.04}
+h2{font-size:1.4rem;line-height:1.2}
+h3{font-size:.95rem;font-weight:600;letter-spacing:0;color:var(--muted)}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--pen);outline-offset:2px}
+.sr{position:absolute;left:-9999px}
+.small{font-size:.875rem;color:var(--muted)}
+
+/* header */
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1.5rem;flex-wrap:wrap;margin-bottom:1.75rem}
+.lead{min-width:0}
+.sum{margin-top:.6rem;color:var(--muted);max-width:40rem;font-size:1.05rem;text-wrap:pretty}
+.actions{display:flex;flex-direction:column;align-items:flex-end;gap:.4rem}
+.actions>div{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end}
+.btn{background:var(--ink);color:var(--paper);border:1px solid var(--ink);border-radius:6px;padding:.62rem 1.05rem;font-weight:600;cursor:pointer}
+.btn:hover{opacity:.9}
+.btn[disabled]{opacity:.6;cursor:progress}
+.btn.quiet{background:transparent;color:var(--ink);border-color:var(--line)}
+#status{min-height:1.4em;font-size:.9rem;text-align:right}
+#status.bad{color:var(--stamp)}
+.note{display:flex;gap:.75rem 1.25rem;flex-wrap:wrap;align-items:center;background:var(--band);border-left:4px solid var(--hi);border-radius:0 8px 8px 0;padding:.8rem 1rem;margin-bottom:2rem}
+.note p{flex:1 1 20rem;min-width:0}
+.note code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem;background:var(--paper);padding:.15rem .4rem;border-radius:4px;overflow-wrap:anywhere}
+.note .age{color:var(--stamp);font-weight:600}
+
+/* layout */
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 21rem;gap:0 3.5rem;align-items:start}
+.main,.side{min-width:0}
+.block{margin-bottom:2.75rem}
+.block>header{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.block>h2{margin-bottom:1rem}
+@media (max-width:62rem){
+  .layout{display:flex;flex-direction:column}
+  .main,.side{display:contents}
+  #sec-alerts{order:1}#sec-week{order:2}#sec-tasks{order:3}#sec-att{order:4}#sec-grades{order:5}#sec-anns{order:6}
+}
+
+/* two-week ruler */
+.week{list-style:none;padding:0;margin:0 0 1.75rem;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.4rem}
+.day{position:relative;width:100%;text-align:left;border:0;border-radius:8px;background:var(--band);padding:.6rem .65rem;cursor:pointer;min-height:5.2rem}
+.day:hover{outline:2px solid var(--line)}
+.day .dn{display:block;font-weight:700;font-size:1.02rem;line-height:1.1}
+.day .dd{display:block;font-size:.8rem;color:var(--muted)}
+.day .bar{display:block;height:6px;border-radius:3px;background:var(--line);margin:.5rem 0 .3rem;overflow:hidden}
+.day .bar i{display:block;height:100%;background:var(--hi)}
+.day .mm{display:block;font-size:.75rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.day .flag{position:absolute;top:.45rem;right:.45rem;min-width:1.15rem;padding:0 .3rem;border-radius:999px;background:var(--stamp);color:#fff;font-size:.72rem;font-weight:700;line-height:1.25rem;text-align:center}
+.day .flag .w{font-weight:600}
+.day.today .dn::after{content:"";display:inline-block;width:.42rem;height:.42rem;border-radius:50%;background:var(--pen);margin-left:.35rem;vertical-align:.12em}
+.day[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.day[aria-pressed="true"] .dd,.day[aria-pressed="true"] .mm{color:var(--paper);opacity:.78}
+.day[aria-pressed="true"] .bar{background:rgba(127,127,127,.4)}
+.day[aria-pressed="true"].today .dn::after{background:var(--hi)}
+@media (max-width:40rem){
+  .day{padding:.5rem .4rem;min-height:4.3rem}.day .mm,.day .mo,.day .flag .w{display:none}
+  .day .flag{position:static;display:inline-block;min-width:1rem;line-height:1.05rem;font-size:.68rem;padding:0 .3rem}
+}
+@media (prefers-reduced-motion:no-preference){.day .bar i{transition:width .3s}}
+
+/* day detail */
+.sub{margin:.2rem 0 1rem}
+.classes{list-style:none;padding:0;margin:0 0 1.5rem;display:grid;gap:.4rem}
+.classes li{display:grid;grid-template-columns:7.5rem minmax(0,1fr) auto;gap:.75rem;padding:.5rem .75rem;border-left:4px solid var(--pen);background:var(--band);border-radius:0 6px 6px 0}
+.classes .t{font-variant-numeric:tabular-nums}
+.classes .r{color:var(--muted);font-size:.9rem}
+@media (max-width:30rem){.classes li{grid-template-columns:1fr auto}.classes .t{grid-column:1/-1;color:var(--muted);font-size:.85rem}}
+.blocks,.dues{list-style:none;padding:0;margin:0}
+.blocks li{display:grid;grid-template-columns:4.4rem minmax(0,1fr) auto;gap:1rem;align-items:center;padding:.85rem 0;border-bottom:1px solid var(--line)}
+.blocks .m{font-weight:700;font-size:1.45rem;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.mark{background:var(--hi);color:var(--on-hi);padding:.05em .3em;margin-left:-.3em;border-radius:2px;font-weight:600;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.meta{display:block;color:var(--muted);font-size:.875rem;margin-top:.15rem}
+.dues{margin-top:1.5rem}
+.dues h3{margin-bottom:.3rem}
+.dues li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1rem;align-items:center;padding:.55rem 0 .55rem .75rem;border-bottom:1px solid var(--line);border-left:3px solid var(--stamp)}
+.rowbtns{display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:.28rem .8rem;font-size:.875rem;cursor:pointer}
+.chip:hover{border-color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.empty{color:var(--muted);padding:.5rem 0;max-width:34rem;text-wrap:pretty}
+@media (max-width:40rem){
+  .blocks li{grid-template-columns:3.9rem minmax(0,1fr);gap:.4rem .8rem}
+  .blocks .rowbtns{grid-column:2;justify-content:flex-start}
+}
+
+/* tasks */
+.tools{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+select,input{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:.4rem .6rem}
+.tasks{list-style:none;padding:0;margin:0}
+.tasks h3{padding:1.1rem 0 .35rem}
+.tasks h3:first-child{padding-top:0}
+.task{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.85rem;align-items:center;padding:.65rem 0 .65rem .7rem;border-bottom:1px solid var(--line);border-left:3px solid transparent}
+.task.late{border-left-color:var(--stamp)}
+.task.soon{border-left-color:var(--hi)}
+.check{width:1.5rem;height:1.5rem;border-radius:50%;border:2px solid var(--ink);background:transparent;padding:0;display:grid;place-items:center;font-size:.85rem;line-height:1;color:var(--paper);cursor:pointer}
+.check[disabled]{cursor:default;opacity:.55}
+.check[aria-pressed="true"]{background:var(--ok);border-color:var(--ok);color:#fff}
+.task .title{display:block;overflow-wrap:anywhere}
+.task.done .title{text-decoration:line-through;color:var(--muted)}
+.due{font-size:.9rem;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.due.soon{color:var(--ink);font-weight:600}
+.due.late{color:var(--stamp);font-weight:700}
+.addform{display:none;background:var(--band);border-radius:8px;padding:1rem;margin-bottom:1rem;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;align-items:end}
+.addform.open{display:grid}
+.addform label{display:grid;gap:.2rem;font-size:.85rem;color:var(--muted)}
+.addform .wide{grid-column:1/-1}
+
+/* side column */
+.alerts{list-style:none;padding:0;margin:0;display:grid;gap:.6rem}
+.alerts li{padding:.6rem .8rem;border-left:4px solid var(--muted);background:var(--band);border-radius:0 6px 6px 0;font-size:.95rem;overflow-wrap:anywhere}
+.alerts li.critical{border-color:var(--stamp)}
+.alerts li.warn{border-color:var(--hi)}
+.alerts li.ok{border-color:var(--ok)}
+.att{list-style:none;padding:0;margin:0;display:grid;gap:1.1rem}
+.att .row{display:flex;justify-content:space-between;gap:.5rem;font-weight:700}
+.att .track{position:relative;height:8px;border-radius:4px;background:var(--line);margin:.45rem 0 .3rem}
+.att .track i{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--ok)}
+.att .low .track i{background:var(--stamp)}
+.att .tick{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ink)}
+.grades,.anns{list-style:none;padding:0;margin:0}
+.grades li{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;padding:.5rem 0;border-bottom:1px solid var(--line)}
+.grades b{font-size:1.15rem;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.grades .na{font-weight:500;color:var(--muted);font-size:.95rem}
+.anns li{padding:.5rem 0;border-bottom:1px solid var(--line);font-size:.95rem}
+
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--ink);width:min(42rem,92vw);padding:1.25rem}
+dialog::backdrop{background:rgba(10,15,20,.55)}
+dialog pre{white-space:pre-wrap;overflow:auto;max-height:50vh;background:var(--band);border-radius:6px;padding:.8rem;font-size:.82rem;line-height:1.45;margin:.9rem 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="lead">
+      <h1 id="today">CollegeOS</h1>
+      <p class="sum" id="summary">Loading your plan.</p>
+    </div>
+    <div class="actions">
+      <div id="liveActions"><button class="btn" id="sync" type="button">Sync and replan</button></div>
+      <div id="staticActions" hidden>
+        <button class="btn" id="openFile" type="button">Open my snapshot</button>
+        <button class="btn quiet" id="useDemo" type="button" hidden>Back to sample data</button>
+        <input type="file" id="file" accept=".json,application/json" hidden>
+      </div>
+      <span class="small" id="made"></span>
+      <span id="status" role="status" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <div class="note" id="note" hidden>
+    <p id="noteText"></p>
+    <code id="cmd">python3 dashboard_server.py --export snapshot.json</code>
+    <button class="chip" id="copy" type="button">Copy command</button>
+  </div>
+
+  <div class="layout">
+    <div class="main">
+      <section class="block" id="sec-week" aria-labelledby="wk">
+        <h2 class="sr" id="wk">Next two weeks</h2>
+        <ol class="week" id="week"></ol>
+        <div id="detail"></div>
+      </section>
+
+      <section class="block" id="sec-tasks" aria-labelledby="tk">
+        <header>
+          <h2 id="tk">Tasks</h2>
+          <div class="tools">
+            <span id="filters"></span>
+            <label class="sr" for="course">Course</label>
+            <select id="course"></select>
+            <button class="chip" id="toggleAdd" type="button" aria-expanded="false">Add task</button>
+          </div>
+        </header>
+        <form class="addform" id="addform" autocomplete="off">
+          <label class="wide" for="f-title">Title<input id="f-title" name="title" required maxlength="120"></label>
+          <label for="f-course">Course<input id="f-course" name="course" list="courses" placeholder="CSL448" maxlength="40"></label>
+          <label for="f-due">Due date<input id="f-due" name="due" type="date" required></label>
+          <label for="f-type">Type<select id="f-type" name="type"></select></label>
+          <label for="f-effort">Effort in minutes<input id="f-effort" name="effort" type="number" min="5" max="2400" placeholder="auto"></label>
+          <label for="f-imp">Importance<select id="f-imp" name="importance"><option value="">auto</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <div class="wide"><button class="btn" type="submit">Save task</button></div>
+          <datalist id="courses"></datalist>
+        </form>
+        <div class="tasks" id="tasks"></div>
+      </section>
+    </div>
+
+    <div class="side">
+      <section class="block" id="sec-alerts" aria-labelledby="at"><h2 id="at">Needs attention</h2><ul class="alerts" id="alerts"></ul></section>
+      <section class="block" id="sec-att" aria-labelledby="ab"><h2 id="ab">Attendance</h2><ul class="att" id="att"></ul></section>
+      <section class="block" id="sec-grades" aria-labelledby="gr"><h2 id="gr">Grades</h2><ul class="grades" id="grades"></ul></section>
+      <section class="block" id="sec-anns" aria-labelledby="an"><h2 id="an">Recent announcements</h2><ul class="anns" id="anns"></ul></section>
+    </div>
+  </div>
+</div>
+
+<dialog id="log">
+  <h2 style="margin-bottom:.5rem">Sync finished</h2>
+  <pre id="logtext"></pre>
+  <button class="btn" type="button" id="logclose">Close</button>
+</dialog>
+
+<script>
+const TOKEN = "__TOKEN__";
+const LIVE = TOKEN.length >= 16;              // the local server swaps in a long random token
+const STORE = "collegeos.snapshot";
+const $ = s => document.querySelector(s);
+let S = null, source = LIVE ? "live" : "demo";
+let selDay = null, filter = "open", courseSel = "all", busy = false, tmr = null;
+
+/* ---------- helpers ---------- */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pd = iso => { const [y,m,d] = iso.split("-").map(Number); return new Date(y, m-1, d); };
+const iso = d => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+const fd = (s, o) => pd(s).toLocaleDateString("en-IN", o);
+const hm = m => String(Math.floor(m/60)).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
+const mins = m => m >= 60 ? Math.floor(m/60) + "h" + (m%60 ? String(m%60).padStart(2,"0") : "") : m + "m";
+const between = (a, b) => Math.round((pd(b) - pd(a)) / 864e5);
+const dl = t => t.due ? between(S.today, t.due) : null;
+const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+
+async function api(path, body) {
+  const opt = {headers: {"X-CollegeOS-Token": TOKEN}};
+  if (body !== undefined) { opt.method = "POST"; opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({error: "The server sent something unreadable."}));
+  if (!r.ok) throw new Error(j.error || ("Request failed (" + r.status + ")"));
+  return j;
+}
+function say(msg, bad) {
+  const el = $("#status"); el.textContent = msg; el.className = bad ? "bad" : "";
+  clearTimeout(tmr); if (msg) tmr = setTimeout(() => { el.textContent = ""; }, 7000);
+}
+function dueInfo(t) {
+  const d = dl(t);
+  if (d === null) return {text: "No due date", cls: ""};
+  if (d < 0) return {text: "Overdue " + (-d) + "d", cls: "late"};
+  if (d === 0) return {text: "Today", cls: "soon"};
+  if (d === 1) return {text: "Tomorrow", cls: "soon"};
+  if (d <= 6) return {text: "In " + d + " days", cls: ""};
+  return {text: fd(t.due, {weekday: "short", day: "numeric", month: "short"}), cls: ""};
+}
+function dueWords(t) {
+  const d = dl(t);
+  if (d === null) return "no due date";
+  if (d < 0) return "overdue " + (-d) + "d";
+  if (d === 0) return "due today";
+  if (d === 1) return "due tomorrow";
+  if (d <= 6) return "due in " + d + " days";
+  return "due " + fd(t.due, {weekday: "short", day: "numeric", month: "short"});
+}
+const sev = t => { if (t.done) return ""; const d = dl(t); return d === null ? "" : d < 0 ? "late" : d <= 2 ? "soon" : ""; };
+
+/* ---------- sample data (dates are relative to today, so it never goes stale) ---------- */
+function demoSnapshot() {
+  const t0 = new Date(), today = iso(t0);
+  const at = n => new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + n);
+  const T = (id, title, course, type, off, est, imp, done) => ({id, title, course, type, due: iso(at(off)), est, remaining: done ? 0 : est, spent: 0, importance: imp, done: !!done, done_on: done ? today : null, source: "sample"});
+  const tasks = [
+    T("a1", "Maths tutorial sheet 4", "MAL401", "assignment", -1, 150, 2),
+    T("a2", "OS quiz on scheduling", "CSL402", "quiz", 2, 90, 3),
+    T("a3", "Algorithms assignment 3: AVL rotations", "CSL448", "assignment", 3, 240, 4),
+    T("a4", "Read chapter 7: normalization", "CSL403", "reading", 5, 90, 2),
+    T("a5", "Lab 4 report", "CSL448", "assignment", 6, 180, 3),
+    T("a6", "Capstone synopsis submission", "CSL499", "project", 8, 480, 5),
+    T("a7", "DBMS mid-sem exam", "CSL403", "exam", 12, 600, 5),
+    T("a8", "Semester feedback form", "HSL401", "admin", 0, 20, 1, true)
+  ];
+  const tt = {1: [["CSL448","Algorithms","B-204",540,600],["CSL403","Database Systems","A-110",660,750]],
+              2: [["CSL402","Operating Systems","B-101",600,660]], 3: [["CSL448","Algorithms","B-204",540,600]],
+              4: [["CSL403","Database Systems","A-110",660,750]], 5: [["CSL402","Operating Systems","B-101",600,660]]};
+  const days = [];
+  for (let i = 0; i < 14; i++) {
+    const d = at(i), wd = d.getDay();
+    days.push({day: iso(d), available: (wd === 0 || wd === 6) ? 300 : 210, planned: 0, blocks: [],
+      classes: (tt[wd] || []).map(c => ({code: c[0], name: c[1], room: c[2], start: c[3], end: c[4]}))});
+  }
+  const atRisk = [];
+  tasks.filter(t => !t.done).sort((a, b) => a.due.localeCompare(b.due)).forEach(t => {
+    let need = t.est;
+    const last = Math.max(0, Math.min(13, between(today, t.due)));
+    for (let i = 0; i <= last && need > 0; i++) {
+      const d = days[i], m = Math.min(need, d.available - d.planned, 120);
+      if (m > 0) { d.blocks.push({task_id: t.id, minutes: m}); d.planned += m; need -= m; }
+    }
+    if (need > 0) atRisk.push({id: t.id, title: t.title, short: need});
+  });
+  const attendance = [["CSL448",40,24],["CSL402",38,33],["CSL403",36,30]].map(a => {
+    const ratio = a[2] / a[1];
+    return {course: a[0], held: a[1], attended: a[2], ratio, threshold: .75, low: ratio < .75,
+            need: Math.max(0, Math.ceil((.75 * a[1] - a[2]) / .25))};
+  });
+  const alerts = [];
+  tasks.filter(t => !t.done && between(today, t.due) < 0).forEach(t => alerts.push({level: "critical", kind: "overdue", message: "Overdue " + (-between(today, t.due)) + "d: " + t.title + " (" + t.course + ")"}));
+  atRisk.forEach(r => alerts.push({level: "critical", kind: "at_risk", message: "Cannot fit " + r.short + "m of " + r.title + " before its deadline"}));
+  attendance.filter(a => a.low).forEach(a => alerts.push({level: "warn", kind: "attendance", message: a.course + " attendance " + (a.ratio * 100).toFixed(1) + "% (below 75%). Attend " + a.need + " classes in a row to recover."}));
+  return {today, generated_at: today, plan_made: today, tasks, plan_days: days, at_risk: atRisk, attendance, alerts,
+    grades: [{course: "CSL448", current_score: 81.5, current_grade: "B+"}, {course: "CSL402", current_score: 74, current_grade: "B"}, {course: "CSL403", current_score: null, current_grade: null}],
+    announcements: [{course: "CSL448", title: "Quiz 2 moved to Wednesday", posted: today}, {course: "CSL403", title: "Project groups finalised", posted: iso(at(-2))}]};
+}
+
+/* ---------- render ---------- */
+function renderHead() {
+  $("#today").textContent = fd(S.today, {weekday: "long", day: "numeric", month: "long"});
+  const open = S.tasks.filter(t => !t.done);
+  const late = open.filter(t => dl(t) !== null && dl(t) < 0).length;
+  const soon = open.filter(t => dl(t) !== null && dl(t) >= 0 && dl(t) <= 2).length;
+  const risk = S.at_risk.length, lowAtt = S.attendance.filter(a => a.low).length;
+  const bits = [];
+  if (late) bits.push(late === 1 ? "1 task is overdue" : late + " tasks are overdue");
+  if (soon) bits.push(soon === 1 ? "1 is due within two days" : soon + " are due within two days");
+  if (risk) bits.push(risk === 1 ? "1 won't fit in your plan" : risk + " won't fit in your plan");
+  if (lowAtt) bits.push("attendance is low in " + plural(lowAtt, "course", "courses"));
+  $("#summary").textContent = bits.length ? bits.join("; ").replace(/^./, c => c.toUpperCase()) + "."
+    : open.length ? "Nothing is overdue or at risk. " + plural(open.length, "open task", "open tasks") + "."
+    : "No open tasks. Add one or sync to pull from Canvas and Gmail.";
+  $("#made").textContent = S.plan_made ? "Plan made " + fd(S.plan_made, {day: "numeric", month: "short"}) : "No plan yet";
+}
+
+function renderWeek() {
+  const dueOn = {};
+  S.tasks.forEach(t => { if (!t.done && t.due) dueOn[t.due] = (dueOn[t.due] || 0) + 1; });
+  $("#week").innerHTML = S.plan_days.map(d => {
+    const pct = d.available > 0 ? Math.min(100, Math.round(100 * d.planned / d.available)) : 0;
+    const n = dueOn[d.day] || 0;
+    return '<li><button type="button" class="day' + (d.day === S.today ? " today" : "") + '" data-act="day" data-day="' + esc(d.day) + '" aria-pressed="' + (d.day === selDay) + '"' +
+      (n ? ' aria-label="' + esc(fd(d.day, {weekday: "long", day: "numeric", month: "long"})) + ', ' + n + ' due"' : '') + '>' +
+      '<span class="dn">' + esc(fd(d.day, {weekday: "short"})) + '</span>' +
+      '<span class="dd">' + esc(fd(d.day, {day: "numeric"})) + '<span class="mo"> ' + esc(fd(d.day, {month: "short"})) + '</span></span>' +
+      '<span class="bar"><i style="width:' + pct + '%"></i></span>' +
+      '<span class="mm">' + mins(d.planned) + ' of ' + mins(d.available) + '</span>' +
+      (n ? '<span class="flag"><b>' + n + '</b><span class="w"> due</span></span>' : '') + '</button></li>';
+  }).join("");
+}
+
+function renderDetail() {
+  const d = S.plan_days.find(x => x.day === selDay) || S.plan_days[0];
+  const byId = Object.fromEntries(S.tasks.map(t => [t.id, t]));
+  const isToday = d.day === S.today;
+  let h = '<h2>' + (isToday ? "Today" : esc(fd(d.day, {weekday: "long", day: "numeric", month: "long"}))) + '</h2>' +
+    '<p class="small sub">' + mins(d.planned) + ' of study planned, ' + mins(d.available) + ' free after classes</p>';
+  if (d.classes.length) {
+    h += '<ul class="classes">' + d.classes.map(c => '<li><span class="t">' + hm(c.start) + '–' + hm(c.end) + '</span><span>' + esc(c.code) + ' ' + esc(c.name) + '</span><span class="r">' + esc(c.room) + '</span></li>').join("") + '</ul>';
+  }
+  if (!d.blocks.length) {
+    h += '<p class="empty">' + (S.tasks.some(t => !t.done)
+      ? "No study blocks on this day. Your open tasks are scheduled on other days."
+      : "Nothing to plan. Add a task or sync to pull deadlines from Canvas and Gmail.") + '</p>';
+  } else {
+    h += '<ul class="blocks">' + d.blocks.map(b => {
+      const t = byId[b.task_id]; if (!t) return "";
+      return '<li><span class="m">' + mins(b.minutes) + '</span>' +
+        '<span><span class="mark">' + esc(t.title) + '</span><span class="meta">' + esc(t.course) + ', ' + esc(dueWords(t)) + ', ' + mins(t.remaining) + ' left</span></span>' +
+        (LIVE ? '<span class="rowbtns">' + (isToday ? '<button class="chip" type="button" data-act="log" data-id="' + esc(t.id) + '">Log 30m</button>' : '') +
+          '<button class="chip" type="button" data-act="done" data-id="' + esc(t.id) + '">Mark done</button></span>' : '<span></span>') + '</li>';
+    }).join("") + '</ul>';
+  }
+  const dues = S.tasks.filter(t => !t.done && t.due === d.day);
+  if (dues.length) {
+    h += '<div class="dues"><h3>Due this day</h3><ul class="dues" style="margin-top:0">' + dues.map(t =>
+      '<li><span><b>' + esc(t.title) + '</b><span class="meta">' + esc(t.course) + ', ' + esc(t.type) + '</span></span>' +
+      (LIVE ? '<button class="chip" type="button" data-act="done" data-id="' + esc(t.id) + '">Mark done</button>' : '') + '</li>').join("") + '</ul></div>';
+  }
+  $("#detail").innerHTML = h;
+}
+
+function taskRow(t) {
+  const di = dueInfo(t);
+  return '<div class="task ' + (t.done ? "done " : "") + sev(t) + '">' +
+    '<button class="check" type="button"' + (LIVE ? ' data-act="' + (t.done ? "reopen" : "done") + '" data-id="' + esc(t.id) + '"' : ' disabled') +
+    ' aria-pressed="' + t.done + '" aria-label="' + (t.done ? "Done: " : "Mark done: ") + esc(t.title) + '">' + (t.done ? "✓" : "") + '</button>' +
+    '<span><span class="title">' + esc(t.title) + '</span><span class="meta">' + esc(t.course) + ', ' + esc(t.type) + (t.done ? "" : ", " + mins(t.remaining) + " left") + '</span></span>' +
+    '<span class="due ' + (t.done ? "" : di.cls) + '">' + (t.done ? "Done" : esc(di.text)) + '</span></div>';
+}
+
+function renderTasks() {
+  const nOpen = S.tasks.filter(t => !t.done).length, nDone = S.tasks.length - nOpen;
+  $("#filters").innerHTML = [["open", "Open " + nOpen], ["done", "Done " + nDone], ["all", "All"]].map(f =>
+    '<button class="chip" type="button" data-act="filter" data-f="' + f[0] + '" aria-pressed="' + (filter === f[0]) + '">' + f[1] + '</button>').join(" ");
+  const courses = [...new Set(S.tasks.map(t => t.course))].sort();
+  if (courseSel !== "all" && !courses.includes(courseSel)) courseSel = "all";
+  $("#course").innerHTML = '<option value="all">All courses</option>' + courses.map(c => '<option value="' + esc(c) + '"' + (c === courseSel ? " selected" : "") + '>' + esc(c) + '</option>').join("");
+  $("#courses").innerHTML = [...new Set([...courses, ...S.attendance.map(a => a.course)])].map(c => '<option value="' + esc(c) + '">').join("");
+  const list = S.tasks.filter(t => (filter === "all" || (filter === "done") === t.done) && (courseSel === "all" || t.course === courseSel));
+  list.sort((a, b) => filter === "done" ? (b.done_on || "").localeCompare(a.done_on || "") : (a.due || "9999").localeCompare(b.due || "9999"));
+  if (!list.length) {
+    $("#tasks").innerHTML = '<p class="empty">' + (S.tasks.length ? "No tasks match this filter." : "No tasks yet. Use Add task, or choose Sync and replan to pull them from Canvas and Gmail.") + '</p>';
+    return;
+  }
+  if (filter !== "open") { $("#tasks").innerHTML = list.map(taskRow).join(""); return; }
+  const names = ["Overdue", "Due this week", "Later", "No due date"], groups = [[], [], [], []];
+  list.forEach(t => { const d = dl(t); groups[d === null ? 3 : d < 0 ? 0 : d <= 6 ? 1 : 2].push(t); });
+  $("#tasks").innerHTML = groups.map((g, i) => g.length ? '<h3>' + names[i] + '</h3>' + g.map(taskRow).join("") : "").join("");
+}
+
+function renderSide() {
+  $("#alerts").innerHTML = S.alerts.length
+    ? S.alerts.map(a => '<li class="' + esc(a.level) + '">' + esc(a.message) + '</li>').join("")
+    : '<li class="ok">All clear. Nothing is overdue or at risk, and attendance is above the limit.</li>';
+  $("#att").innerHTML = S.attendance.length ? S.attendance.map(a => {
+    const pct = Math.round(a.ratio * 1000) / 10, lim = Math.round(a.threshold * 100);
+    const room = Math.floor(a.attended / a.threshold - a.held + 1e-9);
+    const line = a.low ? "Attend " + plural(a.need, "class", "classes") + " in a row to get back to " + lim + "%"
+      : room > 0 ? "You can miss " + plural(room, "more class", "more classes") + " and stay above " + lim + "%" : "No room to miss a class";
+    return '<li class="' + (a.low ? "low" : "") + '"><div class="row"><span>' + esc(a.course) + '</span><span>' + pct + '%</span></div>' +
+      '<div class="track" role="img" aria-label="' + esc(a.course) + ' attendance ' + pct + ' percent, limit ' + lim + ' percent"><i style="width:' + Math.min(100, pct) + '%"></i><span class="tick" style="left:' + lim + '%"></span></div>' +
+      '<span class="small">' + a.attended + ' of ' + a.held + ' classes attended. ' + line + '.</span></li>';
+  }).join("") : '<li class="empty">No attendance yet. Add your ERP details in erp_token.json and sync.</li>';
+  $("#grades").innerHTML = S.grades.length ? S.grades.map(g =>
+    '<li><span>' + esc(g.course) + '</span>' + (g.current_score == null ? '<span class="na">Not shown by Canvas</span>' : '<b>' + Number(g.current_score).toFixed(1) + '%' + (g.current_grade ? " " + esc(g.current_grade) : "") + '</b>') + '</li>').join("")
+    : '<li class="empty">No grades yet. Sync to pull them from Canvas.</li>';
+  $("#anns").innerHTML = S.announcements.length ? S.announcements.slice(0, 6).map(a =>
+    '<li>' + esc(a.title) + '<br><span class="small">' + esc(a.course) + (a.posted ? ", " + esc(fd(a.posted, {day: "numeric", month: "short"})) : "") + '</span></li>').join("")
+    : '<li class="empty">No recent announcements.</li>';
+}
+
+function renderNote() {
+  const note = $("#note");
+  if (LIVE) { note.hidden = true; return; }
+  note.hidden = false;
+  const age = source === "file" && S.generated_at ? between(S.generated_at, iso(new Date())) : 0;
+  $("#noteText").innerHTML = source === "demo"
+    ? "You are looking at sample data. To see your own plan, run this command in your Agentic folder, then choose Open my snapshot."
+    : 'This is your snapshot from ' + esc(fd(S.generated_at || S.today, {day: "numeric", month: "long"})) + '. It is read-only and stays in this browser.' +
+      (age > 0 ? ' <span class="age">It is ' + plural(age, "day", "days") + ' old.</span>' : '') + ' Run the command again for a fresh one.';
+  $("#useDemo").hidden = source !== "file";
+}
+
+function render() { renderHead(); renderWeek(); renderDetail(); renderTasks(); renderSide(); renderNote(); }
+
+/* ---------- data loading ---------- */
+function valid(x) { return x && typeof x === "object" && typeof x.today === "string" && Array.isArray(x.tasks) && Array.isArray(x.plan_days) && x.plan_days.length > 0; }
+function use(snap, src) {
+  S = snap; source = src;
+  S.at_risk = S.at_risk || []; S.attendance = S.attendance || []; S.alerts = S.alerts || [];
+  S.grades = S.grades || []; S.announcements = S.announcements || [];
+  if (!selDay || !S.plan_days.some(d => d.day === selDay)) selDay = S.today;
+  render();
+}
+async function load() { use(await api("/api/state"), "live"); }
+
+async function mutate(path, body, ok) {
+  if (busy) return; busy = true;
+  try { await api(path, body); await load(); say(ok); }
+  catch (e) { say(e.message, true); }
+  finally { busy = false; }
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]"); if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (act === "day") { selDay = el.dataset.day; renderWeek(); renderDetail(); }
+  else if (act === "filter") { filter = el.dataset.f; renderTasks(); }
+  else if (!LIVE) return;
+  else if (act === "done") mutate("/api/done", {id}, "Marked done. Plan updated.");
+  else if (act === "reopen") mutate("/api/reopen", {id}, "Task reopened. Plan updated.");
+  else if (act === "log") mutate("/api/log", {id, minutes: 30}, "Logged 30 minutes.");
+});
+$("#course").addEventListener("change", e => { courseSel = e.target.value; renderTasks(); });
+$("#toggleAdd").addEventListener("click", e => {
+  const f = $("#addform"), open = !f.classList.contains("open");
+  f.classList.toggle("open", open); e.target.setAttribute("aria-expanded", open);
+  if (open) $("#f-title").focus();
+});
+$("#addform").addEventListener("submit", async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  if (busy) return; busy = true;
+  try { await api("/api/add", data); e.target.reset(); await load(); say("Task added. Plan updated."); }
+  catch (err) { say(err.message, true); }
+  finally { busy = false; }
+});
+$("#sync").addEventListener("click", async () => {
+  if (busy) return; busy = true;
+  const b = $("#sync"); b.disabled = true; b.textContent = "Syncing…";
+  try {
+    const r = await api("/api/sync", {});
+    await load();
+    $("#logtext").textContent = r.log.trim() || "Nothing to report.";
+    $("#log").showModal();
+  } catch (e) { say(e.message, true); }
+  finally { busy = false; b.disabled = false; b.textContent = "Sync and replan"; }
+});
+$("#logclose").addEventListener("click", () => $("#log").close());
+
+$("#openFile").addEventListener("click", () => $("#file").click());
+$("#file").addEventListener("change", e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const snap = JSON.parse(r.result);
+      if (!valid(snap)) throw new Error("bad");
+      try { localStorage.setItem(STORE, JSON.stringify(snap)); } catch (_) {}
+      use(snap, "file"); say("Snapshot loaded. It stays in this browser only.");
+    } catch (_) { say("That file isn't a CollegeOS snapshot. Create one with: python3 dashboard_server.py --export snapshot.json", true); }
+  };
+  r.onerror = () => say("Couldn't read that file.", true);
+  r.readAsText(f);
+});
+$("#useDemo").addEventListener("click", () => {
+  try { localStorage.removeItem(STORE); } catch (_) {}
+  use(demoSnapshot(), "demo"); say("Snapshot removed from this browser.");
+});
+$("#copy").addEventListener("click", async () => {
+  const text = $("#cmd").textContent;
+  try { await navigator.clipboard.writeText(text); say("Command copied."); }
+  catch (_) { const r = document.createRange(); r.selectNodeContents($("#cmd")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); say("Press Ctrl+C or Cmd+C to copy."); }
+});
+
+/* ---------- start ---------- */
+(async () => {
+  $("#f-type").innerHTML = ["assignment","quiz","exam","reading","project","admin"].map(t => "<option>" + t + "</option>").join("");
+  $("#liveActions").hidden = !LIVE; $("#staticActions").hidden = LIVE;
+  $("#toggleAdd").hidden = !LIVE;
+  if (LIVE) {
+    try { await load(); }
+    catch (e) { say(e.message, true); $("#summary").textContent = "Couldn't load your data. Is the server still running in Terminal?"; }
+    setInterval(() => { if (!busy && !document.hidden) load().catch(() => {}); }, 60000);
+    return;
+  }
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(STORE) || "null"); } catch (_) {}
+  if (valid(saved)) use(saved, "file"); else use(demoSnapshot(), "demo");
+})();
+</script>
+</body>
+</html>

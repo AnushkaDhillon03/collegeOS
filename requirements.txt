@@ -1,0 +1,2 @@
+# CollegeOS deployment gateway uses Python's standard library.
+# Add third-party packages here only if your CollegeOS integrations require them.
